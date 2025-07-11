@@ -1,12 +1,19 @@
 {
   "name": "@kaliber/web-push",
+  "description": "Zero dependency web push utilities",
   "version": "0.0.1",
   "type": "module",
+  "main": "index.js",
   "bin": {
     "generate-vapid-keys": "./scripts/generate-vapid-keys.js"
   },
   "files": [
     "package.json",
-    "scripts/generate-vapid-keys.js"
-  ]
+    "scripts/generate-vapid-keys.js",
+    "src/sendPushNotification.js",
+    "index.js",
+    "tsconfig.json",
+    "readme.md"
+  ],
+  "license": "MIT"
 }

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Example</title>
+    <script defer type="module">
+      import "/client-subscribe-to-web-push.js"
+      import "/client-web-push-form-handler.js"
+    </script>
+</head>
+<body>
+    <h1>Example</h1>
+
+    <p>
+      <button id="subscribe" type="button">Subscribe to web push</button>
+    </p>
+
+    <hr />
+
+    <p>
+      <style>
+        .form {
+          display: grid;
+          grid-template-columns: min-content 1fr;
+          gap: 10px;
+          max-width: 300px;
+
+          & > * {
+            font-family: inherit;
+            font-size: inherit;
+          }
+
+          & > button {
+            grid-column: 2;
+            justify-self: end;
+          }
+        }
+      </style>
+      <form id="push-notification-form" class="form">
+        Title
+        <input name="title" />
+        Body
+        <textarea name="body" rows="4"></textarea>
+        <button type="submit">Send</button>
+      </form>
+    </p>
+</body>
+</html>

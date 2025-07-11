@@ -1,0 +1,13 @@
+{
+  "typeAcquisition": {
+    "enable": true
+  },
+  "compilerOptions": {
+    "lib": ["ESNext", "WebWorker", "DOM", "DOM.Iterable"],
+    "target": "esnext",
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "module": "nodenext"
+  }
+}

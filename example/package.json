@@ -1,0 +1,8 @@
+{
+  "type": "module",
+  "scripts": {
+    "serve": "node --watch ./src/server.js",
+    "generate-vapid-keys": "generate-vapid-keys",
+    "generate-ssl-keys": "./scripts/generate-ssl-keys.bash"
+  }
+}
