@@ -1,0 +1,12 @@
+{
+  "name": "@kaliber/web-push",
+  "version": "0.0.1",
+  "type": "module",
+  "bin": {
+    "generate-vapid-keys": "./scripts/generate-vapid-keys.js"
+  },
+  "files": [
+    "package.json",
+    "scripts/generate-vapid-keys.js"
+  ]
+}
