@@ -69,3 +69,8 @@ This file listens for a form submit and sends that information to the server API
 ## `server-web-push.js`
 
 This file contains the subscriptions and calls the library for each subscription.
+
+
+# Debugging
+
+You can 'unregister' your service worker in your dev-tools at the Application > Service workers location.
