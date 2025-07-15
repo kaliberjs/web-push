@@ -1,4 +1,7 @@
-document.addEventListener('DOMContentLoaded', handleDomContentLoaded)
+if (document.readyState === 'loading')
+  document.addEventListener('DOMContentLoaded', handleDomContentLoaded)
+else
+  handleDomContentLoaded()
 
 if (!navigator.serviceWorker)
     throw new Error('Browser does not support registering service worker')

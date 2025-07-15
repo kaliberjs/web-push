@@ -1,4 +1,7 @@
-document.addEventListener('DOMContentLoaded', handleDomContentLoaded)
+if (document.readyState === 'loading')
+  document.addEventListener('DOMContentLoaded', handleDomContentLoaded)
+else
+  handleDomContentLoaded()
 
 function handleDomContentLoaded() {
   const form = /** @type {HTMLFormElement} */ (document.getElementById('push-notification-form'))
