@@ -1,6 +1,5 @@
 {
   "type": "module",
-  "name": "@kaliber/web-push",
   "scripts": {
     "serve": "node --watch ./src/server.js",
     "generate-vapid-keys": "generate-vapid-keys",
@@ -8,6 +7,5 @@
   },
   "dependencies": {
     "@kaliber/web-push": "*"
-  },
-  "version": "1.0.0"
+  }
 }
