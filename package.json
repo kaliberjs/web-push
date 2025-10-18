@@ -7,6 +7,9 @@
   "bin": {
     "generate-vapid-keys": "./scripts/generate-vapid-keys.js"
   },
+  "scripts": {
+    "test": "node --test"
+  },
   "files": [
     "package.json",
     "scripts/generate-vapid-keys.js",
