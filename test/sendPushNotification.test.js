@@ -49,8 +49,8 @@ describe('sendPushNotification', () => {
     server.listen()
   })
 
-  after(() => {
-    server.close()
+  after(async () => {
+    await new Promise(resolve => server.close(resolve))
   })
 
   beforeEach(() => {
@@ -72,16 +72,15 @@ describe('sendPushNotification', () => {
   })
 
   it('should throw PushServerError on 404 response', async () => {
-    server.close()
-    server = createServer((_, res) => {
+    const errorServer = createServer((_, res) => {
       res.writeHead(404)
       res.end()
     })
-    server.listen()
+    errorServer.listen()
 
     await rejects(
       sendPushNotification({
-        subscription: getSubscription(server),
+        subscription: getSubscription(errorServer),
         vapid,
         payload
       }),
@@ -91,19 +90,19 @@ describe('sendPushNotification', () => {
         return true
       }
     )
+    await new Promise(resolve => errorServer.close(resolve))
   })
 
   it('should throw PushServerError on 500 response', async () => {
-    server.close()
-    server = createServer((_, res) => {
+    const errorServer = createServer((_, res) => {
       res.writeHead(500)
       res.end()
     })
-    server.listen()
+    errorServer.listen()
 
     await rejects(
       sendPushNotification({
-        subscription: getSubscription(server),
+        subscription: getSubscription(errorServer),
         vapid,
         payload
       }),
@@ -113,6 +112,7 @@ describe('sendPushNotification', () => {
         return true
       }
     )
+    await new Promise(resolve => errorServer.close(resolve))
   })
 
   it('should throw error on malformed subscription', async () => {
