@@ -3,6 +3,7 @@ import { deepStrictEqual, rejects, strictEqual } from 'node:assert'
 import { createServer } from 'node:http'
 import { sendPushNotification, PushServerError } from '../src/sendPushNotification.js'
 import { readFileSync } from 'node:fs'
+import { once } from 'node:events'
 
 const vapidKeys = JSON.parse(readFileSync('test/vapid-keys.json', 'utf-8'))
 
@@ -14,24 +15,14 @@ const vapid = {
 
 const payload = 'test-payload'
 
-function getSubscription(server) {
-  const { port, address } = server.address()
-  return {
-    endpoint: `http://${address}:${port}`,
-    keys: {
-      p256dh: 'BIPUL12DLfytvTajnryr2PRdAgXS3HGKiLqndGcJGabyhHheJYlNGCeXl1dn18gSJ1WAkAPIxr4gK0_dQds4yiI',
-      auth: 'FPssNDTKnInHVndSTdbKFw'
-    }
-  }
-}
-
 describe('sendPushNotification', () => {
   /** @type {import('node:http').Server} */
   let server
-  /** @type {import('./sendPushNotification.test.js').Request[]} */
+  /** @type {Array<{ headers: any, body: string }>} */
   let requests
+  let handleResponse
 
-  before(() => {
+  before(async () => {
     server = createServer((req, res) => {
       let body = ''
       req.on('data', chunk => {
@@ -42,19 +33,25 @@ describe('sendPushNotification', () => {
           headers: req.headers,
           body
         })
-        res.writeHead(201)
-        res.end()
+        if (handleResponse)
+          handleResponse(res)
+        else {
+          res.writeHead(201)
+          res.end()
+        }
       })
     })
-    server.listen()
+    server.listen(0, '0.0.0.0')
+    await once(server, 'listening')
   })
 
   after(async () => {
-    await new Promise(resolve => server.close(resolve))
+    await close(server)
   })
 
   beforeEach(() => {
     requests = []
+    handleResponse = null
   })
 
   it('should send a push notification', async () => {
@@ -72,47 +69,45 @@ describe('sendPushNotification', () => {
   })
 
   it('should throw PushServerError on 404 response', async () => {
-    const errorServer = createServer((_, res) => {
+    handleResponse = (res) => {
       res.writeHead(404)
       res.end()
-    })
-    errorServer.listen()
+    }
 
     await rejects(
       sendPushNotification({
-        subscription: getSubscription(errorServer),
+        subscription: getSubscription(server),
         vapid,
         payload
       }),
       (err) => {
         strictEqual(err instanceof PushServerError, true)
-        strictEqual(err.status, 404)
+        if (err instanceof PushServerError)
+          strictEqual(err.status, 404)
         return true
       }
     )
-    await new Promise(resolve => errorServer.close(resolve))
   })
 
   it('should throw PushServerError on 500 response', async () => {
-    const errorServer = createServer((_, res) => {
+    handleResponse = (res) => {
       res.writeHead(500)
       res.end()
-    })
-    errorServer.listen()
+    }
 
     await rejects(
       sendPushNotification({
-        subscription: getSubscription(errorServer),
+        subscription: getSubscription(server),
         vapid,
         payload
       }),
       (err) => {
         strictEqual(err instanceof PushServerError, true)
-        strictEqual(err.status, 500)
+        if (err instanceof PushServerError)
+          strictEqual(err.status, 500)
         return true
       }
     )
-    await new Promise(resolve => errorServer.close(resolve))
   })
 
   it('should throw error on malformed subscription', async () => {
@@ -137,3 +132,20 @@ describe('sendPushNotification', () => {
     )
   })
 })
+
+function getSubscription(server) {
+  const { port, address } = server.address()
+  return {
+    endpoint: `http://${address}:${port}`,
+    keys: {
+      p256dh: 'BIPUL12DLfytvTajnryr2PRdAgXS3HGKiLqndGcJGabyhHheJYlNGCeXl1dn18gSJ1WAkAPIxr4gK0_dQds4yiI',
+      auth: 'FPssNDTKnInHVndSTdbKFw'
+    },
+    expirationTime: Date.now() + 10000
+  }
+}
+
+
+function close(server) {
+  return new Promise(resolve => server.close(resolve))
+}
