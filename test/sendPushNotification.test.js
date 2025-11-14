@@ -1,0 +1,171 @@
+import assert from 'node:assert'
+import { describe, it, before, after } from 'node:test'
+import http from 'node:http'
+import fs from 'node:fs'
+import path from 'node:path'
+import { sendPushNotification } from '../src/sendPushNotification.js'
+import crypto from 'node:crypto'
+
+const vapid = JSON.parse(fs.readFileSync(path.resolve('test/vapid.json'), 'utf-8'))
+
+// We'll capture the request here
+let request = null
+
+const server = http.createServer((req, res) => {
+  const body = []
+  req.on('data', chunk => body.push(chunk))
+  req.on('end', () => {
+    request = {
+      method: req.method,
+      headers: req.headers,
+      body: Buffer.concat(body)
+    }
+    res.writeHead(201, { 'Content-Type': 'application/json' })
+    res.end()
+  })
+})
+
+describe('sendPushNotification', () => {
+  before(() => new Promise(resolve => server.listen(8080, resolve)))
+  after(() => new Promise(resolve => server.close(resolve)))
+
+  it('should send a push notification', async () => {
+    request = null
+    const subscription = createSubscription()
+
+    await sendPushNotification({
+      subscription,
+      vapid: createVapid(),
+      payload: 'test payload'
+    })
+
+    assert.strictEqual(request.method, 'POST')
+    assert.strictEqual(request.headers['ttl'], '86400')
+    assert.strictEqual(request.headers['content-encoding'], 'aes128gcm')
+    assert.ok(request.headers['authorization'].startsWith('vapid t='))
+    assert.ok(request.body.length > 0)
+  })
+
+  it('should encrypt the payload', async () => {
+    request = null
+    const subscription = createSubscription()
+
+    const payload = 'test payload'
+    await sendPushNotification({
+      subscription,
+      vapid: createVapid(),
+      payload
+    })
+
+    const decrypted = decryptPayload(request.body, subscription._client, subscription.keys.auth)
+
+    assert.strictEqual(decrypted, payload)
+  })
+
+  it('should throw for push service errors', async () => {
+    const errorServer = http.createServer((req, res) => {
+      res.writeHead(500, { 'Content-Type': 'text/plain' })
+      res.end('Internal Server Error')
+    }).listen(8081)
+
+    try {
+      await sendPushNotification({
+        subscription: { ...createSubscription(), endpoint: 'http://localhost:8081' },
+        vapid: createVapid(),
+        payload: 'test payload'
+      })
+      assert.fail('should have thrown')
+    } catch (e) {
+      assert.strictEqual(e.status, 500)
+      assert.strictEqual(e.message, 'Push service responded with status 500: Internal Server Error')
+    } finally {
+      await new Promise(resolve => errorServer.close(resolve))
+    }
+  })
+})
+
+function createSubscription(keys = {}) {
+  const client = crypto.createECDH('prime256v1')
+  client.generateKeys()
+
+  return {
+    endpoint: 'http://localhost:8080',
+    keys: {
+      p256dh: client.getPublicKey('base64'),
+      auth: crypto.randomBytes(16).toString('base64'),
+      ...keys
+    },
+    expirationTime: null,
+    _client: client
+  }
+}
+
+function createVapid() {
+  return {
+    publicKey: vapid.publicKeyBase64Url,
+    privateKey: vapid.privateKeyPem,
+    subject: 'mailto:test@example.com'
+  }
+}
+
+/**
+ * @param {Buffer} encryptedPayload
+ * @param {import('node:crypto').ECDH} client
+ * @param {string} auth
+ */
+function decryptPayload(encryptedPayload, client, auth) {
+  const salt = encryptedPayload.subarray(0, 16)
+  const recordSize = encryptedPayload.readUInt32BE(16)
+  const serverPublicKey = encryptedPayload.subarray(21, 86)
+  const ciphertext = encryptedPayload.subarray(86)
+
+  const sharedSecret = client.computeSecret(serverPublicKey)
+  const authSecret = Buffer.from(auth, 'base64url')
+
+  const clientPublicKey = client.getPublicKey()
+
+  const pseudoRandomKeyInfo = Buffer.concat([
+    Buffer.from('WebPush: info\0', 'ascii'),
+    clientPublicKey,
+    serverPublicKey,
+  ])
+
+  const hashedScharedSecret = crypto.createHmac('sha256', authSecret)
+    .update(sharedSecret)
+    .digest()
+
+  const pseudoRandomKey = hkdf(hashedScharedSecret, pseudoRandomKeyInfo, 32)
+
+  const hashedPseudoRandomKey = crypto.createHmac('sha256', salt)
+    .update(pseudoRandomKey)
+    .digest()
+
+  const encryptionKey = hkdf(hashedPseudoRandomKey, contentEncoding('aes128gcm'), 16)
+  const nonce = hkdf(hashedPseudoRandomKey, contentEncoding('nonce'), 12)
+
+  const decipher = crypto.createDecipheriv('aes-128-gcm', encryptionKey, nonce)
+  decipher.setAuthTag(ciphertext.subarray(ciphertext.length - 16))
+  const decrypted = Buffer.concat([decipher.update(ciphertext.subarray(0, ciphertext.length - 16)), decipher.final()])
+
+  // The decrypted payload has a padding delimiter at the end that needs to be removed
+  return decrypted.subarray(0, decrypted.length - 1).toString('utf-8')
+}
+
+
+/** @param {string} encoding */
+function contentEncoding(encoding) {
+  return Buffer.from(`Content-Encoding: ${encoding}\0`, 'ascii')
+}
+
+/**
+ * @param {Buffer} key
+ * @param {Buffer} info
+ * @param {number} length
+ */
+function hkdf(key, info, length) {
+  return crypto.createHmac('sha256', key)
+    .update(info)
+    .update(Buffer.from([0x01]))
+    .digest()
+    .subarray(0, length)
+}
