@@ -26,16 +26,20 @@ import crypto from 'node:crypto'
  *   subscription: Subscription
  *   vapid: Vapid
  *   payload: string     // Typically a JSON object: { "title": "string", "body": "string" }
+ *   urgency?: 'very-low' | 'low' | 'normal' | 'high'
+ *   topic?: string
  * }} props
  */
 export async function sendPushNotification({
   subscription,
   vapid,
   payload,
+  urgency,
+  topic,
 }) {
   const endpoint = subscription.endpoint
 
-  const headers = createWebPushHeaders(endpoint, vapid)
+  const headers = createWebPushHeaders(endpoint, vapid, { urgency, topic })
   const encryptedPayload = encryptPayload(payload, subscription.keys)
 
   const response = await fetch(endpoint, { method: 'POST', headers, body: encryptedPayload })
@@ -61,8 +65,9 @@ export class PushServerError extends Error {
 /**
  * @param {string} endpoint
  * @param {{ publicKey: string, privateKey: string, subject: string }} vapid
+ * @param {{ urgency?: string, topic?: string }} [options]
 */
-function createWebPushHeaders(endpoint, vapid) {
+function createWebPushHeaders(endpoint, vapid, options = {}) {
  const audience = new URL(endpoint).origin
  const jwt = createVapidJwt(audience, vapid.subject, vapid.privateKey)
 
@@ -70,6 +75,8 @@ function createWebPushHeaders(endpoint, vapid) {
    'TTL': '86400',
    'Content-Encoding': 'aes128gcm',
    'Authorization': `vapid t=${jwt}, k=${vapid.publicKey}`,
+   ...(options.urgency && { 'Urgency': options.urgency }),
+   ...(options.topic && { 'Topic': options.topic }),
  }
 }
 

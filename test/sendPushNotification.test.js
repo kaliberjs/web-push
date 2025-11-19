@@ -4,6 +4,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import { sendPushNotification } from '../src/sendPushNotification.js'
 import crypto from 'node:crypto'
+import * as jose from 'jose'
 
 const vapid = JSON.parse(fs.readFileSync(new URL('./vapid.json', import.meta.url), 'utf-8'))
 
@@ -60,27 +61,101 @@ describe('sendPushNotification', { concurrency: 1 }, () => {
     assert.ok(request, 'Expected the push service to receive a request')
     const decrypted = decryptPayload(request.body, subscription._client, subscription.keys.auth)
 
-    assert.strictEqual(decrypted, payload)
+    assert.strictEqual(decrypted.toString('utf-8'), payload)
+  })
+
+  it('should encrypt the payload with correct padding', async () => {
+    request = null
+    const subscription = createSubscription()
+    const payload = 'test payload'
+
+    await sendPushNotification({
+      subscription,
+      vapid: createVapid(),
+      payload
+    })
+
+    assert.ok(request, 'Expected the push service to receive a request')
+    const decrypted = decryptPayload(request.body, subscription._client, subscription.keys.auth, true)
+
+    // Find the last non-zero octet to locate the padding delimiter
+    let delimiterIndex = decrypted.length - 1
+    while (delimiterIndex >= 0 && decrypted[delimiterIndex] === 0) {
+      delimiterIndex--
+    }
+
+    assert.ok(delimiterIndex >= 0, 'Expected to find a padding delimiter')
+    assert.strictEqual(decrypted[delimiterIndex], 0x02, 'Expected padding delimiter to be 0x02 for the last record')
+
+    const extractedPayload = decrypted.subarray(0, delimiterIndex)
+    assert.strictEqual(extractedPayload.toString('utf-8'), payload, 'Extracted payload should match original payload')
+  })
+
+  it('should send a valid VAPID JWT', async () => {
+    request = null
+    const subscription = createSubscription()
+
+    const vapid = createVapid()
+    await sendPushNotification({
+      subscription,
+      vapid,
+      payload: 'test'
+    })
+
+    assert.ok(request, 'Expected the push service to receive a request')
+
+    const authHeader = request.headers['authorization']
+    assert.ok(authHeader.startsWith('vapid t='), 'Expected auth header to start with "vapid t="')
+
+    const token = authHeader.substring('vapid t='.length).split(',')[0]
+    const publicKey = await jose.importSPKI(vapid.publicKeyPem, 'ES256')
+    const { payload } = await jose.jwtVerify(token, publicKey, {
+      algorithms: ['ES256']
+    })
+
+    const { origin } = new URL(subscription.endpoint)
+    assert.strictEqual(payload.aud, origin, 'Expected audience to be the origin of the subscription endpoint')
+    assert.ok(payload.exp > Date.now() / 1000, 'Expected expiration to be in the future')
+    assert.strictEqual(payload.sub, vapid.subject, 'Expected subject to match VAPID subject')
+  })
+
+  it('should send Urgency and Topic headers', async () => {
+    request = null
+    const subscription = createSubscription()
+
+    await sendPushNotification({
+      subscription,
+      vapid: createVapid(),
+      payload: 'test',
+      urgency: 'high',
+      topic: 'test-topic'
+    })
+
+    assert.ok(request, 'Expected the push service to receive a request')
+    assert.strictEqual(request.headers['urgency'], 'high')
+    assert.strictEqual(request.headers['topic'], 'test-topic')
   })
 
   it('should throw for push service errors', async () => {
-    const errorServer = http.createServer((req, res) => {
-      res.writeHead(500, { 'Content-Type': 'text/plain' })
-      res.end('Internal Server Error')
-    }).listen(0)
+    for (const status of [404, 410, 500]) {
+      const errorServer = http.createServer((req, res) => {
+        res.writeHead(status, { 'Content-Type': 'text/plain' })
+        res.end(`Error ${status}`)
+      }).listen(0)
 
-    try {
-      await sendPushNotification({
-        subscription: { ...createSubscription(), endpoint: `http://localhost:${errorServer.address().port}` },
-        vapid: createVapid(),
-        payload: 'test payload'
-      })
-      assert.fail('should have thrown')
-    } catch (e) {
-      assert.strictEqual(e.status, 500)
-      assert.strictEqual(e.message, 'Push service responded with status 500: Internal Server Error')
-    } finally {
-      await new Promise(resolve => errorServer.close(resolve))
+      try {
+        await sendPushNotification({
+          subscription: { ...createSubscription(), endpoint: `http://localhost:${errorServer.address().port}` },
+          vapid: createVapid(),
+          payload: 'test payload'
+        })
+        assert.fail('should have thrown')
+      } catch (e) {
+        assert.strictEqual(e.status, status)
+        assert.strictEqual(e.message, `Push service responded with status ${status}: Error ${status}`)
+      } finally {
+        await new Promise(resolve => errorServer.close(resolve))
+      }
     }
   })
 })
@@ -112,6 +187,7 @@ function toBase64Url(buffer) {
 function createVapid() {
   return {
     publicKey: vapid.publicKeyBase64Url,
+    publicKeyPem: vapid.publicKeyPem,
     privateKey: vapid.privateKeyPem,
     subject: 'mailto:test@example.com'
   }
@@ -121,8 +197,9 @@ function createVapid() {
  * @param {Buffer} encryptedPayload
  * @param {import('node:crypto').ECDH} client
  * @param {string} auth
+ * @param {boolean} [raw=false]
  */
-function decryptPayload(encryptedPayload, client, auth) {
+function decryptPayload(encryptedPayload, client, auth, raw = false) {
   const salt = encryptedPayload.subarray(0, 16)
   const recordSize = encryptedPayload.readUInt32BE(16)
   const serverPublicKey = encryptedPayload.subarray(21, 86)
@@ -156,8 +233,23 @@ function decryptPayload(encryptedPayload, client, auth) {
   decipher.setAuthTag(ciphertext.subarray(ciphertext.length - 16))
   const decrypted = Buffer.concat([decipher.update(ciphertext.subarray(0, ciphertext.length - 16)), decipher.final()])
 
-  // The decrypted payload has a padding delimiter at the end that needs to be removed
-  return decrypted.subarray(0, decrypted.length - 1).toString('utf-8')
+  if (raw) return decrypted
+
+  // Find the last non-zero octet to locate the padding delimiter
+  let delimiterIndex = decrypted.length - 1
+  while (delimiterIndex >= 0 && decrypted[delimiterIndex] === 0) {
+    delimiterIndex--
+  }
+
+  if (delimiterIndex < 0) throw new Error('Padding delimiter not found')
+
+  const delimiter = decrypted[delimiterIndex]
+  // As this library only sends a single record, the delimiter must be 0x02
+  if (delimiter !== 0x02) throw new Error(`Invalid padding delimiter: ${delimiter}`)
+
+
+  // The actual payload is the data before the delimiter
+  return decrypted.subarray(0, delimiterIndex)
 }
 
 
