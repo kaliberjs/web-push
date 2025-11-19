@@ -2,11 +2,10 @@ import assert from 'node:assert'
 import { describe, it, before, after } from 'node:test'
 import http from 'node:http'
 import fs from 'node:fs'
-import path from 'node:path'
 import { sendPushNotification } from '../src/sendPushNotification.js'
 import crypto from 'node:crypto'
 
-const vapid = JSON.parse(fs.readFileSync(path.resolve('test/vapid.json'), 'utf-8'))
+const vapid = JSON.parse(fs.readFileSync(new URL('./vapid.json', import.meta.url), 'utf-8'))
 
 // We'll capture the request here
 let request = null
@@ -25,8 +24,8 @@ const server = http.createServer((req, res) => {
   })
 })
 
-describe('sendPushNotification', () => {
-  before(() => new Promise(resolve => server.listen(8080, resolve)))
+describe('sendPushNotification', { concurrency: 1 }, () => {
+  before(() => new Promise(resolve => server.listen(0, resolve)))
   after(() => new Promise(resolve => server.close(resolve)))
 
   it('should send a push notification', async () => {
@@ -66,11 +65,11 @@ describe('sendPushNotification', () => {
     const errorServer = http.createServer((req, res) => {
       res.writeHead(500, { 'Content-Type': 'text/plain' })
       res.end('Internal Server Error')
-    }).listen(8081)
+    }).listen(0)
 
     try {
       await sendPushNotification({
-        subscription: { ...createSubscription(), endpoint: 'http://localhost:8081' },
+        subscription: { ...createSubscription(), endpoint: `http://localhost:${errorServer.address().port}` },
         vapid: createVapid(),
         payload: 'test payload'
       })
@@ -89,7 +88,7 @@ function createSubscription(keys = {}) {
   client.generateKeys()
 
   return {
-    endpoint: 'http://localhost:8080',
+    endpoint: `http://localhost:${server.address().port}`,
     keys: {
       p256dh: client.getPublicKey('base64'),
       auth: crypto.randomBytes(16).toString('base64'),
@@ -130,11 +129,11 @@ function decryptPayload(encryptedPayload, client, auth) {
     serverPublicKey,
   ])
 
-  const hashedScharedSecret = crypto.createHmac('sha256', authSecret)
+  const hashedSharedSecret = crypto.createHmac('sha256', authSecret)
     .update(sharedSecret)
     .digest()
 
-  const pseudoRandomKey = hkdf(hashedScharedSecret, pseudoRandomKeyInfo, 32)
+  const pseudoRandomKey = hkdf(hashedSharedSecret, pseudoRandomKeyInfo, 32)
 
   const hashedPseudoRandomKey = crypto.createHmac('sha256', salt)
     .update(pseudoRandomKey)
