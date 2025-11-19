@@ -90,6 +90,35 @@ describe('sendPushNotification', { concurrency: 1 }, () => {
     assert.strictEqual(extractedPayload.toString('utf-8'), payload, 'Extracted payload should match original payload')
   })
 
+  it('should send a valid VAPID JWT', async () => {
+    request = null
+    const subscription = createSubscription()
+    const vapid = createVapid()
+
+    await sendPushNotification({
+      subscription,
+      vapid,
+      payload: 'test',
+    })
+
+    assert.ok(request, 'Expected the push service to receive a request')
+    const authHeader = request.headers['authorization']
+    assert.ok(authHeader.startsWith('vapid t='), 'Expected auth header to start with "vapid t="')
+
+    const [jwt] = authHeader.substring('vapid t='.length).split(',')
+    const [header, payload, signature] = jwt.split('.').map(x => Buffer.from(x, 'base64url'))
+
+    const verifier = crypto.createVerify('SHA256')
+    verifier.update(`${header.toString('base64url')}.${payload.toString('base64url')}`)
+    assert.ok(verifier.verify({ key: vapid.publicKeyPem, dsaEncoding: 'ieee-p1363' }, signature), 'Expected JWT signature to be valid')
+
+    const parsedPayload = JSON.parse(payload.toString('utf-8'))
+    const { origin } = new URL(subscription.endpoint)
+    assert.strictEqual(parsedPayload.aud, origin, 'Expected audience to be the origin of the subscription endpoint')
+    assert.ok(parsedPayload.exp > Date.now() / 1000, 'Expected expiration to be in the future')
+    assert.strictEqual(parsedPayload.sub, vapid.subject, 'Expected subject to match VAPID subject')
+  })
+
   it('should send Urgency and Topic headers', async () => {
     request = null
     const subscription = createSubscription()
@@ -158,6 +187,7 @@ function toBase64Url(buffer) {
 function createVapid() {
   return {
     publicKey: vapid.publicKeyBase64Url,
+    publicKeyPem: vapid.publicKeyPem,
     privateKey: vapid.privateKeyPem,
     subject: 'mailto:test@example.com'
   }
