@@ -38,6 +38,7 @@ describe('sendPushNotification', { concurrency: 1 }, () => {
       payload: 'test payload'
     })
 
+    assert.ok(request, 'Expected the push service to receive a request')
     assert.strictEqual(request.method, 'POST')
     assert.strictEqual(request.headers['ttl'], '86400')
     assert.strictEqual(request.headers['content-encoding'], 'aes128gcm')
@@ -56,6 +57,7 @@ describe('sendPushNotification', { concurrency: 1 }, () => {
       payload
     })
 
+    assert.ok(request, 'Expected the push service to receive a request')
     const decrypted = decryptPayload(request.body, subscription._client, subscription.keys.auth)
 
     assert.strictEqual(decrypted, payload)
@@ -90,13 +92,21 @@ function createSubscription(keys = {}) {
   return {
     endpoint: `http://localhost:${server.address().port}`,
     keys: {
-      p256dh: client.getPublicKey('base64'),
-      auth: crypto.randomBytes(16).toString('base64'),
+      p256dh: toBase64Url(client.getPublicKey()),
+      auth: toBase64Url(crypto.randomBytes(16)),
       ...keys
     },
     expirationTime: null,
     _client: client
   }
+}
+
+function toBase64Url(buffer) {
+  return buffer
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
 }
 
 function createVapid() {
