@@ -33,6 +33,7 @@ function generateVapidKeys() {
 
   return {
     publicKeyBase64Url: publicKeyBuffer.toString('base64url'),
+    publicKeyPem: publicKey.export({ type: 'spki', format: 'pem' }),
     privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }),
   }
 }
