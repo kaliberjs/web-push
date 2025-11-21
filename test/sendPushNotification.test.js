@@ -137,7 +137,7 @@ describe('sendPushNotification', { concurrency: 1 }, () => {
   })
 
   it('should throw for push service errors', async () => {
-    for (const status of [404, 410, 500]) {
+    for (const status of [400, 404, 410, 500]) {
       const errorServer = http.createServer((req, res) => {
         res.writeHead(status, { 'Content-Type': 'text/plain' })
         res.end(`Error ${status}`)
